@@ -13,14 +13,24 @@ public struct WheelEventInfo: Equatable, Sendable {
     public var deltaVertical: Int64
     /// `kCGScrollWheelEventDeltaAxis2` (horizontal, lines).
     public var deltaHorizontal: Int64
+    /// ⇧ held.
+    public var hasShift: Bool
 
     public init(isSynthetic: Bool, isContinuous: Bool, hasGestureModifier: Bool,
-                deltaVertical: Int64, deltaHorizontal: Int64) {
+                deltaVertical: Int64, deltaHorizontal: Int64, hasShift: Bool = false) {
         self.isSynthetic = isSynthetic
         self.isContinuous = isContinuous
         self.hasGestureModifier = hasGestureModifier
         self.deltaVertical = deltaVertical
         self.deltaHorizontal = deltaHorizontal
+        self.hasShift = hasShift
+    }
+
+    /// ⇧ + a plain vertical wheel means "scroll sideways". AppKit only does
+    /// this swap for line-based (non-continuous) events, and the smoothed
+    /// replacement is pixel-based, so the filter has to swap the axes itself.
+    public var shiftScrollsHorizontally: Bool {
+        hasShift && deltaHorizontal == 0
     }
 }
 
@@ -45,6 +55,10 @@ public enum ScrollEventFilter {
               !event.hasGestureModifier,
               event.deltaVertical != 0 || event.deltaHorizontal != 0
         else { return .passThrough }
+        if event.shiftScrollsHorizontally {
+            // Same sign as AppKit's own swap (deltaX = deltaY).
+            return .smooth(vertical: 0, horizontal: notches(event.deltaVertical))
+        }
         return .smooth(vertical: notches(event.deltaVertical), horizontal: notches(event.deltaHorizontal))
     }
 

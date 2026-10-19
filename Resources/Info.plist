@@ -7,7 +7,7 @@
 	<key>CFBundleExecutable</key>
 	<string>SmoothScroll</string>
 	<key>CFBundleIdentifier</key>
-	<string>local.smoothscroll</string>
+	<string>io.github.nginx1337.smoothscroll</string>
 	<key>CFBundleName</key>
 	<string>SmoothScroll</string>
 	<key>CFBundleDisplayName</key>
@@ -25,6 +25,6 @@
 	<key>LSUIElement</key>
 	<true/>
 	<key>NSHumanReadableCopyright</key>
-	<string>Local build. No network access, no telemetry.</string>
+	<string>© 2026 nginx1337. MIT License.</string>
 </dict>
 </plist>

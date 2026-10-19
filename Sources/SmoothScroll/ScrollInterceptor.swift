@@ -47,18 +47,18 @@ final class ScrollInterceptor: NSObject {
     // Captured from the latest real wheel event.
     private var targetFlags: CGEventFlags = []
     private var targetWindow = 0
+    private var lastPointer = CGPoint(x: CGFloat.nan, y: .nan)
+    private var lastPointerWindow = 0
 
-    /// A glide that has produced no frame for this long is considered dead
-    /// (display asleep, screen unplugged) and is discarded.
+    /// A glide that has produced no frame for this long gets a fresh display
+    /// link on the next notch.
     private static let stallTimeout: TimeInterval = 0.25
 
     override init() {
         super.init()
-        context.onWheel = { [weak self] vertical, horizontal, flags in
+        context.onWheel = { [weak self] notch in
             DispatchQueue.main.async {
-                MainActor.assumeIsolated {
-                    self?.handleWheel(vertical: vertical, horizontal: horizontal, flags: flags)
-                }
+                MainActor.assumeIsolated { self?.handleWheel(notch) }
             }
         }
     }
@@ -95,13 +95,16 @@ final class ScrollInterceptor: NSObject {
     }
 
     /// Called on the main thread for every wheel event the filter swallowed.
-    private func handleWheel(vertical: Double, horizontal: Double, flags: CGEventFlags) {
+    private func handleWheel(_ notch: WheelNotch) {
         guard isEnabled else { return }
         let now = ProcessInfo.processInfo.systemUptime
         if displayLink != nil && now - lastActivity > Self.stallTimeout {
-            // The link stopped delivering frames; don't add a stale distance
-            // to this notch, and recreate the link below.
-            stopAnimation()
+            // No frame for a while: the link may be dead, or the main thread
+            // was just busy. Recreate the link below but keep the distance;
+            // a genuinely stale glide is already dropped by the screen
+            // sleep/change observers.
+            displayLink?.invalidate()
+            displayLink = nil
         }
         let window = windowUnderPointer()
         if stopsOnWindowChange && window != targetWindow {
@@ -109,8 +112,10 @@ final class ScrollInterceptor: NSObject {
             animator.reset()
         }
         targetWindow = window
-        animator.addNotches(vertical: vertical, horizontal: horizontal, at: now)
-        targetFlags = flags
+        // Timestamped on the tap thread, so a busy main thread delivering
+        // several queued notches at once can't fake a fast spin.
+        animator.addNotches(vertical: notch.vertical, horizontal: notch.horizontal, at: notch.time)
+        targetFlags = notch.flags
         lastActivity = now
         startAnimation()
     }
@@ -140,7 +145,7 @@ final class ScrollInterceptor: NSObject {
     @objc private func frame(_ link: CADisplayLink) {
         // The pointer moved to another window: stop instead of scrolling
         // something the wheel was never turned over.
-        if stopsOnWindowChange && windowUnderPointer() != targetWindow {
+        if stopsOnWindowChange && windowUnderPointerIfMoved() != targetWindow {
             stopAnimation()
             return
         }
@@ -181,13 +186,22 @@ final class ScrollInterceptor: NSObject {
         // Location is deliberately left as created (the current pointer
         // position): posting an event with an explicit location warps the
         // cursor there. Leaving the target window is handled in `frame`.
-        // Keep ⇧ so ⇧-scroll still scrolls horizontally.
+        // ⇧-scroll arrives here already converted to the horizontal axis.
         event.flags = targetFlags
         event.post(tap: .cgSessionEventTap)
     }
 
     private func windowUnderPointer() -> Int {
-        NSWindow.windowNumber(at: NSEvent.mouseLocation, belowWindowWithWindowNumber: 0)
+        let location = NSEvent.mouseLocation
+        lastPointer = location
+        lastPointerWindow = NSWindow.windowNumber(at: location, belowWindowWithWindowNumber: 0)
+        return lastPointerWindow
+    }
+
+    /// Per-frame variant: the window-server hit test only runs when the
+    /// pointer actually moved since the last lookup.
+    private func windowUnderPointerIfMoved() -> Int {
+        NSEvent.mouseLocation == lastPointer ? lastPointerWindow : windowUnderPointer()
     }
 
     /// Drop in-flight glides when displays sleep or change, so a leftover
@@ -209,6 +223,15 @@ final class ScrollInterceptor: NSObject {
 
 // MARK: - Event tap thread
 
+/// One swallowed wheel event, handed from the tap thread to the main thread.
+private struct WheelNotch: Sendable {
+    var vertical: Double
+    var horizontal: Double
+    var flags: CGEventFlags
+    /// Uptime when the tap saw the event, not when the main thread got it.
+    var time: TimeInterval
+}
+
 /// State shared between the main thread and the event-tap thread.
 /// Every mutable field is guarded by `lock`.
 private final class TapContext: @unchecked Sendable {
@@ -218,7 +241,7 @@ private final class TapContext: @unchecked Sendable {
     private var runLoop: CFRunLoop?
 
     /// Set once at init on the main thread, read on the tap thread.
-    var onWheel: @Sendable (Double, Double, CGEventFlags) -> Void = { _, _, _ in }
+    var onWheel: @Sendable (WheelNotch) -> Void = { _ in }
 
     var enabled: Bool {
         get { lock.withLock { _enabled } }
@@ -286,19 +309,26 @@ private func scrollTapCallback(
         return pass
     }
 
-    let flags = event.flags
+    var flags = event.flags
     let info = WheelEventInfo(
         isSynthetic: event.getIntegerValueField(.eventSourceUserData) == syntheticEventMarker,
         isContinuous: event.getIntegerValueField(.scrollWheelEventIsContinuous) != 0,
         hasGestureModifier: !flags.intersection([.maskCommand, .maskControl, .maskAlternate]).isEmpty,
         deltaVertical: event.getIntegerValueField(.scrollWheelEventDeltaAxis1),
-        deltaHorizontal: event.getIntegerValueField(.scrollWheelEventDeltaAxis2)
+        deltaHorizontal: event.getIntegerValueField(.scrollWheelEventDeltaAxis2),
+        hasShift: flags.contains(.maskShift)
     )
     switch ScrollEventFilter.decide(info, enabled: context.enabled) {
     case .passThrough:
         return pass
     case let .smooth(vertical, horizontal):
-        context.onWheel(vertical, horizontal, flags)
+        // The axes are already swapped; a leftover ⇧ could make an app swap
+        // them back or treat the scroll specially.
+        if info.shiftScrollsHorizontally { flags.remove(.maskShift) }
+        context.onWheel(WheelNotch(
+            vertical: vertical, horizontal: horizontal, flags: flags,
+            time: ProcessInfo.processInfo.systemUptime
+        ))
         return nil
     }
 }

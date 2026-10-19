@@ -3,10 +3,10 @@ import Testing
 
 private func wheel(
     synthetic: Bool = false, continuous: Bool = false, modifier: Bool = false,
-    v: Int64 = 1, h: Int64 = 0
+    v: Int64 = 1, h: Int64 = 0, shift: Bool = false
 ) -> WheelEventInfo {
     WheelEventInfo(isSynthetic: synthetic, isContinuous: continuous, hasGestureModifier: modifier,
-                   deltaVertical: v, deltaHorizontal: h)
+                   deltaVertical: v, deltaHorizontal: h, hasShift: shift)
 }
 
 @Suite struct ScrollEventFilterTests {
@@ -38,6 +38,17 @@ private func wheel(
 
     @Test func coalescedNotchesKeepMagnitude() {
         #expect(ScrollEventFilter.decide(wheel(v: 3), enabled: true) == .smooth(vertical: 3, horizontal: 0))
+    }
+
+    @Test func shiftTurnsVerticalWheelIntoHorizontal() {
+        #expect(ScrollEventFilter.decide(wheel(v: -2, shift: true), enabled: true) == .smooth(vertical: 0, horizontal: -2))
+        #expect(wheel(v: 1, shift: true).shiftScrollsHorizontally)
+    }
+
+    @Test func shiftLeavesExistingHorizontalAlone() {
+        // A tilt wheel already reports horizontal motion; don't swap it.
+        #expect(ScrollEventFilter.decide(wheel(v: 0, h: 1, shift: true), enabled: true) == .smooth(vertical: 0, horizontal: 1))
+        #expect(!wheel(v: 0, h: 1, shift: true).shiftScrollsHorizontally)
     }
 
     @Test func notchesPerEventAreCapped() {

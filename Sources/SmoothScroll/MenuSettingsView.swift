@@ -10,9 +10,9 @@ struct MenuSettingsView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            slider("Скорость", value: $settings.pixelsPerNotch, in: 20...200, step: 5,
+            slider("Скорость", value: $settings.pixelsPerNotch, in: Settings.Range.pixelsPerNotch, step: Settings.Range.step,
                    label: "\(Int(settings.pixelsPerNotch)) px")
-            slider("Плавность", value: $settings.smoothingMs, in: 30...300, step: 5,
+            slider("Плавность", value: $settings.smoothingMs, in: Settings.Range.smoothingMs, step: Settings.Range.step,
                    label: "\(Int(settings.smoothingMs)) мс")
         }
         .padding(.horizontal, 14)

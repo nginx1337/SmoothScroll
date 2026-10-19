@@ -14,6 +14,13 @@ final class Settings {
         static let acceleration = ScrollConfig().acceleration
     }
 
+    /// Slider limits shared by the settings window and the menu.
+    enum Range {
+        static let pixelsPerNotch: ClosedRange<Double> = 20...200
+        static let smoothingMs: ClosedRange<Double> = 30...300
+        static let step: Double = 5
+    }
+
     var enabled: Bool { didSet { save(enabled, Key.enabled) } }
     /// Pixels per wheel notch.
     var pixelsPerNotch: Double { didSet { save(pixelsPerNotch, Key.pixelsPerNotch) } }

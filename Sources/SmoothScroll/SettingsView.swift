@@ -36,7 +36,7 @@ struct SettingsView: View {
             }
 
             Section("Скорость") {
-                Slider(value: $settings.pixelsPerNotch, in: 20...200, step: 5) {
+                Slider(value: $settings.pixelsPerNotch, in: Settings.Range.pixelsPerNotch, step: Settings.Range.step) {
                     Text("Шаг")
                 } minimumValueLabel: {
                     Image(systemName: "tortoise")
@@ -51,7 +51,7 @@ struct SettingsView: View {
             }
 
             Section("Плавность") {
-                Slider(value: $settings.smoothingMs, in: 30...300, step: 5) {
+                Slider(value: $settings.smoothingMs, in: Settings.Range.smoothingMs, step: Settings.Range.step) {
                     Text("Длительность")
                 } minimumValueLabel: {
                     Text("резко").font(.caption)
