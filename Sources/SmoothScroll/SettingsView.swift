@@ -2,6 +2,7 @@ import AppKit
 import ServiceManagement
 import SmoothScrollCore
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct SettingsView: View {
     static let width: CGFloat = 460
@@ -84,6 +85,51 @@ struct SettingsView: View {
                 }
             }
 
+            Section {
+                Toggle(isOn: $settings.limitRate) {
+                    Text("Ограничить частоту щелчков")
+                    Text("Для колёсика со свободным ходом: лишние щелчки в потоке отбрасываются")
+                }
+                LabeledContent("Не чаще чем раз в") {
+                    HStack {
+                        Slider(value: $settings.minNotchMs, in: Settings.Range.minNotchMs, step: Settings.Range.step)
+                            .frame(width: 160)
+                        Text("\(Int(settings.minNotchMs)) мс").monospacedDigit().foregroundStyle(.secondary)
+                    }
+                }
+                .disabled(!settings.limitRate)
+            }
+
+            Section {
+                ForEach($settings.profiles) { $profile in
+                    DisclosureGroup(isExpanded: expansion(profile.id)) {
+                        ProfileEditor(profile: $profile) { settings.removeProfile(profile.id) }
+                    } label: {
+                        HStack {
+                            Text(profile.name)
+                            Spacer()
+                            if profile.excluded {
+                                Text("отключено").foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                }
+                HStack {
+                    Button("Добавить приложение…", action: pickApplication)
+                    if let id = settings.frontmostBundleID, let name = settings.frontmostName,
+                       settings.profile(for: id) == nil {
+                        Button("Добавить «\(name)»") {
+                            settings.ensureProfile(bundleID: id, name: name)
+                            settings.selectedProfileID = id
+                        }
+                    }
+                }
+            } header: {
+                Text("Приложения")
+            } footer: {
+                Text("Профиль включается, когда приложение активно. Можно полностью отключить плавную прокрутку (игры, 3D-редакторы) или задать свои параметры.")
+            }
+
             Section("Проверка — покрутите колёсико здесь") {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 6) {
@@ -110,6 +156,26 @@ struct SettingsView: View {
         .frame(width: Self.width)
         .frame(minHeight: 320, idealHeight: Self.idealHeight)
         .onAppear { settings.launchAtLogin = SMAppService.mainApp.status == .enabled }
+    }
+
+    private func expansion(_ id: String) -> Binding<Bool> {
+        Binding(
+            get: { settings.selectedProfileID == id },
+            set: { open in
+                if open { settings.selectedProfileID = id }
+                else if settings.selectedProfileID == id { settings.selectedProfileID = nil }
+            }
+        )
+    }
+
+    private func pickApplication() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.application]
+        panel.directoryURL = URL(filePath: "/Applications")
+        panel.allowsMultipleSelection = false
+        panel.prompt = "Добавить"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        settings.selectedProfileID = settings.addProfile(appURL: url)
     }
 
     private func presetRow(
@@ -164,6 +230,39 @@ private extension SmoothnessPreset {
         case .low: "Коротко"
         case .medium: "Средне"
         case .high: "Длинно"
+        }
+    }
+}
+
+/// Editor for one app profile: exclusion switch plus its own scroll parameters.
+private struct ProfileEditor: View {
+    @Binding var profile: AppProfile
+    var onDelete: () -> Void
+
+    var body: some View {
+        Toggle("Отключить плавную прокрутку в этом приложении", isOn: $profile.excluded)
+        if !profile.excluded {
+            LabeledContent("Скорость: \(Int(profile.pixelsPerNotch)) px") {
+                Slider(value: $profile.pixelsPerNotch, in: Settings.Range.pixelsPerNotch, step: Settings.Range.step)
+                    .frame(width: 200)
+            }
+            LabeledContent("Плавность: \(Int(profile.smoothingMs)) мс") {
+                Slider(value: $profile.smoothingMs, in: Settings.Range.smoothingMs, step: Settings.Range.step)
+                    .frame(width: 200)
+            }
+            Toggle("Ускорение", isOn: $profile.accelerate)
+            Toggle("Обратное направление", isOn: $profile.reverse)
+            Toggle("Ограничить частоту щелчков", isOn: $profile.limitRate)
+            if profile.limitRate {
+                LabeledContent("Не чаще чем раз в \(Int(profile.minNotchMs)) мс") {
+                    Slider(value: $profile.minNotchMs, in: Settings.Range.minNotchMs, step: Settings.Range.step)
+                        .frame(width: 200)
+                }
+            }
+        }
+        HStack {
+            Spacer()
+            Button("Удалить профиль", role: .destructive, action: onDelete)
         }
     }
 }
