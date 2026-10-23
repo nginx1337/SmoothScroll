@@ -83,21 +83,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     /// Profiles follow the foreground app; SmoothScroll's own windows keep the previous app's profile.
     private func trackFrontmostApp() {
-        noteFrontmost(NSWorkspace.shared.frontmostApplication)
+        let current = NSWorkspace.shared.frontmostApplication
+        noteFrontmost(id: current?.bundleIdentifier, name: current?.localizedName)
         frontmostObserver = NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main
         ) { [weak self] note in
+            // Pull out Sendable strings here; the notification itself can't cross into the main-actor closure.
+            let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication
+            let id = app?.bundleIdentifier
+            let name = app?.localizedName
             MainActor.assumeIsolated {
-                self?.noteFrontmost(note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication)
+                self?.noteFrontmost(id: id, name: name)
                 self?.applySettings()
             }
         }
     }
 
-    private func noteFrontmost(_ app: NSRunningApplication?) {
-        guard let id = app?.bundleIdentifier, id != Bundle.main.bundleIdentifier else { return }
+    private func noteFrontmost(id: String?, name: String?) {
+        guard let id, id != Bundle.main.bundleIdentifier else { return }
         settings.frontmostBundleID = id
-        settings.frontmostName = app?.localizedName ?? id
+        settings.frontmostName = name ?? id
     }
 
     private func updateIcon() {
