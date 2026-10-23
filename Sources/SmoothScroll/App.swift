@@ -22,9 +22,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var statusItem: NSStatusItem!
     private var accessTimer: Timer?
     private var settingsWindow: NSWindow?
+    private var frontmostObserver: NSObjectProtocol?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         settings.onChange = { [weak self] in self?.applySettings() }
+        trackFrontmostApp()
         applySettings()
 
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
@@ -67,17 +69,41 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         updateIcon()
     }
 
+    /// Smooth scrolling is on globally and not switched off for the foreground app.
+    private var effectivelyEnabled: Bool {
+        settings.enabled && !settings.isExcluded(settings.frontmostBundleID)
+    }
+
     private func applySettings() {
-        interceptor.config = settings.scrollConfig
-        interceptor.isEnabled = settings.enabled
+        interceptor.config = settings.scrollConfig(for: settings.frontmostBundleID)
+        interceptor.isEnabled = effectivelyEnabled
         interceptor.stopsOnWindowChange = settings.stopOnWindowChange
         updateIcon()
+    }
+
+    /// Profiles follow the foreground app; SmoothScroll's own windows keep the previous app's profile.
+    private func trackFrontmostApp() {
+        noteFrontmost(NSWorkspace.shared.frontmostApplication)
+        frontmostObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main
+        ) { [weak self] note in
+            MainActor.assumeIsolated {
+                self?.noteFrontmost(note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication)
+                self?.applySettings()
+            }
+        }
+    }
+
+    private func noteFrontmost(_ app: NSRunningApplication?) {
+        guard let id = app?.bundleIdentifier, id != Bundle.main.bundleIdentifier else { return }
+        settings.frontmostBundleID = id
+        settings.frontmostName = app?.localizedName ?? id
     }
 
     private func updateIcon() {
         guard let button = statusItem?.button else { return }
         if interceptor.isRunning {
-            button.image = settings.enabled ? StatusIcon.on : StatusIcon.off
+            button.image = effectivelyEnabled ? StatusIcon.on : StatusIcon.off
         } else {
             // No Accessibility access: a standard warning sign reads clearer.
             let image = NSImage(systemSymbolName: "exclamationmark.triangle", accessibilityDescription: "SmoothScroll")
@@ -102,6 +128,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let toggle = item("Плавная прокрутка", #selector(toggleEnabled))
         toggle.state = settings.enabled ? .on : .off
         menu.addItem(toggle)
+        if let id = settings.frontmostBundleID, let name = settings.frontmostName {
+            let exclude = item("Отключить в «\(name)»", #selector(toggleExcludeFrontmost))
+            exclude.state = settings.isExcluded(id) ? .on : .off
+            menu.addItem(exclude)
+            menu.addItem(item("Свои настройки для «\(name)»…", #selector(customizeFrontmost)))
+        }
         menu.addItem(.separator())
         menu.addItem(MenuSettingsView.menuItem(settings: settings))
         let accelerate = item("Ускорение при быстрой прокрутке", #selector(toggleAccelerate))
@@ -135,6 +167,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc private func toggleReverse() {
         settings.reverse.toggle()
+    }
+
+    @objc private func toggleExcludeFrontmost() {
+        guard let id = settings.frontmostBundleID, let name = settings.frontmostName else { return }
+        settings.setExcluded(!settings.isExcluded(id), bundleID: id, name: name)
+    }
+
+    @objc private func customizeFrontmost() {
+        guard let id = settings.frontmostBundleID, let name = settings.frontmostName else { return }
+        settings.ensureProfile(bundleID: id, name: name)
+        settings.selectedProfileID = id
+        showSettings()
     }
 
     @objc private func toggleStopOnWindowChange() {

@@ -148,3 +148,41 @@ private let noAccel = ScrollConfig(pixelsPerNotch: 60, smoothing: 0.09, accelera
         }
     }
 }
+
+@Suite struct NotchRateLimitTests {
+    @Test func fastSpinKeepsOneNotchPerInterval() {
+        var animator = ScrollAnimator(config: ScrollConfig(acceleration: 0, minNotchInterval: 0.035))
+        // 10 ms between events for 100 ms: only t = 0, 40, 80 ms are accepted.
+        for i in 0...10 { animator.addNotches(vertical: 1, horizontal: 0, at: Double(i) * 0.01) }
+        #expect(animator.pending.vertical == 180)
+    }
+
+    @Test func reversalIsNeverDropped() {
+        var animator = ScrollAnimator(config: ScrollConfig(acceleration: 0, minNotchInterval: 0.04))
+        animator.addNotches(vertical: 1, horizontal: 0, at: 0)
+        animator.addNotches(vertical: -1, horizontal: 0, at: 0.001)
+        #expect(animator.pending.vertical == -60)
+    }
+
+    @Test func disabledLimitKeepsEveryNotch() {
+        var animator = ScrollAnimator(config: ScrollConfig(acceleration: 0))
+        for i in 0...4 { animator.addNotches(vertical: 1, horizontal: 0, at: Double(i) * 0.005) }
+        #expect(animator.pending.vertical == 300)
+    }
+}
+
+@Suite struct AppProfileTests {
+    @Test func profileRoundTripsThroughJSON() throws {
+        let profile = AppProfile(bundleID: "com.example.game", name: "Game", excluded: true, limitRate: true)
+        let data = try JSONEncoder().encode([profile])
+        #expect(try JSONDecoder().decode([AppProfile].self, from: data) == [profile])
+    }
+
+    @Test func configHonoursAccelerationAndRateLimit() {
+        var profile = AppProfile(bundleID: "a", name: "A", accelerate: false, limitRate: true, minNotchMs: 50)
+        #expect(profile.scrollConfig.acceleration == 0)
+        #expect(profile.scrollConfig.minNotchInterval == 0.05)
+        profile.limitRate = false
+        #expect(profile.scrollConfig.minNotchInterval == 0)
+    }
+}

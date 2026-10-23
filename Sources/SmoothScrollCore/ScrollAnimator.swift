@@ -15,6 +15,10 @@ public struct ScrollConfig: Equatable, Sendable {
     public var accelerationWindow: Double
     /// Invert scroll direction for the mouse wheel only.
     public var reverse: Bool
+    /// Notches in the same direction arriving closer than this (seconds) are
+    /// dropped. Tames free-spinning wheels that fire dozens of events per
+    /// second (0 disables the limit).
+    public var minNotchInterval: Double
 
     public init(
         pixelsPerNotch: Double = 60,
@@ -22,7 +26,8 @@ public struct ScrollConfig: Equatable, Sendable {
         acceleration: Double = 0.35,
         maxMultiplier: Double = 4,
         accelerationWindow: Double = 0.09,
-        reverse: Bool = false
+        reverse: Bool = false,
+        minNotchInterval: Double = 0
     ) {
         self.pixelsPerNotch = pixelsPerNotch
         self.smoothing = smoothing
@@ -30,6 +35,7 @@ public struct ScrollConfig: Equatable, Sendable {
         self.maxMultiplier = maxMultiplier
         self.accelerationWindow = accelerationWindow
         self.reverse = reverse
+        self.minNotchInterval = minNotchInterval
     }
 
     /// Clamps every value into a safe range so bad defaults can never
@@ -44,6 +50,7 @@ public struct ScrollConfig: Equatable, Sendable {
         c.acceleration = clamp(acceleration, 0, 2)
         c.maxMultiplier = clamp(maxMultiplier, 1, 10)
         c.accelerationWindow = clamp(accelerationWindow, 0.01, 0.5)
+        c.minNotchInterval = clamp(minNotchInterval, 0, 0.5)
         return c
     }
 }
@@ -126,6 +133,10 @@ private struct Axis: Sendable {
     mutating func add(notches: Double, at time: TimeInterval, config: ScrollConfig) {
         guard notches.isFinite, notches != 0 else { return }
         let direction: Double = notches > 0 ? 1 : -1
+
+        // Free-spinning wheel: keep only one notch per interval.
+        if config.minNotchInterval > 0, direction == lastDirection,
+           time - lastNotchTime < config.minNotchInterval { return }
 
         if direction != lastDirection {
             // Direction reversal: stop the old glide immediately.
